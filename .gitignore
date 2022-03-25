@@ -113,3 +113,7 @@ venv.bak/
 *.iml
 /bash/distributed_imagenet.sh
 exp.sh
+
+# ---- User Defined ----
+mcunet/data/
+mcunet/logs/

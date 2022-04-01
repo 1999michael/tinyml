@@ -49,9 +49,9 @@ class BasicBlock(nn.Module):
         return out
 
 
-class ResNet(nn.Module):
+class ResNet_3layer(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
-        super(ResNet, self).__init__()
+        super(ResNet_3layer, self).__init__()
         self.in_planes = 16
 
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
@@ -77,26 +77,87 @@ class ResNet(nn.Module):
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
-        out = F.avg_pool2d(out, out.size()[3])
+        out = F.avg_pool2d(out, int(out.size()[3]))
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
 
 
-def ResNet20(num_classes=8):
-    return ResNet(BasicBlock, [3, 3, 3], num_classes=num_classes)
+class ResNet_2layer(nn.Module):
+    def __init__(self, block, num_blocks, num_classes=10):
+        super(ResNet_2layer, self).__init__()
+        self.in_planes = 16
+
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2)
+        self.linear = nn.Linear(32, num_classes)
+
+        self.apply(_weights_init)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1]*(num_blocks-1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = F.avg_pool2d(out, int(out.size()[3]))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+        return out
 
 
-def ResNet32(num_classes=8):
-    return ResNet(BasicBlock, [5, 5, 5], num_classes=num_classes)
+class ResNet_1layer(nn.Module):
+    def __init__(self, block, num_blocks, num_classes=10):
+        super(ResNet_1layer, self).__init__()
+        self.in_planes = 16
 
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1)
+        self.linear = nn.Linear(16, num_classes)
 
-def ResNet44(num_classes=8):
-    return ResNet(BasicBlock, [7, 7, 7], num_classes=num_classes)
+        self.apply(_weights_init)
 
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1]*(num_blocks-1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
 
-def ResNet56(num_classes=8):
-    return ResNet(BasicBlock, [9, 9, 9], num_classes=num_classes)
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = F.avg_pool2d(out, int(out.size()[3]))
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+        return out
+
+resnet_layers_dict = {1: ResNet_1layer, 2:ResNet_2layer, 3:ResNet_3layer}
+
+def ResNet20(num_classes=8, num_layers=3):
+    return resnet_layers_dict[num_layers](BasicBlock, [3, 3, 3], num_classes=num_classes)
+
+def ResNet32(num_classes=8, num_layers=3):
+    return resnet_layers_dict[num_layers](BasicBlock, [5, 5, 5], num_classes=num_classes)
+
+def ResNet44(num_classes=8, num_layers=3):
+    return resnet_layers_dict[num_layers](BasicBlock, [7, 7, 7], num_classes=num_classes)
+
+def ResNet56(num_classes=8, num_layers=3):
+    return resnet_layers_dict[num_layers](BasicBlock, [9, 9, 9], num_classes=num_classes)
 
 
 class Small(nn.Module):

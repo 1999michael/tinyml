@@ -32,6 +32,10 @@ parser.add_argument('--epochs', default=50, type=int)
 parser.add_argument('--lr', default=0.05, type=float)
 parser.add_argument('--seed', default=1000, type=int)
 parser.add_argument('--optim', default="SGD", type=str, choices=['SGD', 'SAM'])
+parser.add_argument('--weight_loss', default=0, type=int, 
+    help="rescaling class-wise for weights (2 for esophagitis/normal z-line, 1 for others")
+parser.add_argument('--weight_cl16', default=2, type=float, 
+    help="loss rescale factors for classes 1 & 6")
 
 # Logging Arguments
 parser.add_argument('--log_dir', default='../logs', type=str)
@@ -46,7 +50,7 @@ class KvasirDataset(Dataset):
         self.classes = [
             #'dyed-lifted-polyps',
             #'dyed-resection-margins',
-            'esophagitis',
+            #'esophagitis',
             'normal-cecum',
             'normal-pylorus',
             'normal-z-line',
@@ -151,10 +155,26 @@ def precision(output, target):
 
 def get_run_name(args):
     random_string = ''.join(random.choice('0123456789abcdefghijklmnopqrstuvwxyz') for _ in range(6))
-    run_name = 'arch=' + str(args.arch) + "_lr=" + str(args.lr) + "_epochs=" + str(args.epochs) + \
-                '_res=' + str(args.resolution) + "_split=" + str(args.train_test_split) + \
-                '_seed=' + str(args.seed) + "_layers=" + str(args.layers) + "_optim=" + args.optim + \
-                '_' + random_string
+
+    wloss_str = ''
+    if args.weight_loss == 1:
+        wloss_str = "_wloss=1"
+
+    split_str = ''
+    if args.train_test_split != 0.8:
+        split_str = "_split=" + str(args.train_test_split)
+
+    optim_str = ''
+    if args.arch != 'resnet20':
+        optim_str = "_optim=" + str(args.optim)
+
+    batch_str = ''
+    if args.batch_size != 64:
+        batch_str = "_batch=" + str(args.batch_size)
+
+    run_name = "arch=" + str(args.arch) + "_lr=" + str(args.lr) + "_epochs=" + str(args.epochs) + batch_str + \
+               "_res=" + str(args.resolution) + split_str + "_layers=" + str(args.layers) + \
+               optim_str + wloss_str + '_seed=' + str(args.seed) + "_" + random_string
     return run_name
 
 def get_confusion_matrix(num_classes, dataloader, model):
@@ -169,6 +189,9 @@ def get_confusion_matrix(num_classes, dataloader, model):
     return confusion_matrix.cpu().detach().numpy()
 
 def main(args):
+    # Get run name before seed
+    run_name = get_run_name(args)
+
     # Reproducibility
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -187,13 +210,19 @@ def main(args):
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, num_workers=4, shuffle=True)
 
     # Create Neural Network Objects
-    model = models_dict[args.arch](num_layers=args.layers).cuda()
-    criterion = nn.CrossEntropyLoss().cuda()
+    model = models_dict[args.arch](num_classes=len(train_dataset.classes), num_layers=args.layers).cuda()
+
+    if args.weight_loss == 1:
+        criterion = nn.CrossEntropyLoss(weight=torch.tensor([args.weight_cl16, 1, 1, args.weight_cl16, 1, 1]).float()).cuda()
+    else:
+        criterion = nn.CrossEntropyLoss().cuda()
+
     if args.optim == 'SGD':
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     elif args.optim == 'SAM':
-        base_optimizer = torch.optim.SGD  # define an optimizer for the "sharpness-aware" update
+        base_optimizer = torch.optim.SGD  # define a base optimizer for the "sharpness-aware" update
         optimizer = SAM(model.parameters(), base_optimizer, lr=args.lr, momentum=args.momentum)
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     # Data Logging Variables
@@ -202,7 +231,6 @@ def main(args):
     test_acc, test_loss, test_time = [], [], []
     test_f1, test_recall, test_precision = [], [], []
     final_confusion_matrix = None #
-    run_name = get_run_name(args)
 
     for epoch in range(args.epochs):
 
